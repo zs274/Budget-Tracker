@@ -5,48 +5,76 @@ const FILES_TO_CACHE = [
     "/styles.css",
     "/indexedDB.js",
     "/icons/icon-192x192.png",
-    "/icons/icon-512x512.png"
+    "/icons/icon-512x512.png",
+    "/manifest.json"
 ];
 
-const PRECACHE = 'precache-v1';
-const RUNTIME = 'runtime';
+const STATIC_CACHE = `static-cache-v1`;
+const RUNTIME_CACHE = `runtime-cache`;
 
-self.addEventListener('install', event => {
+self.addEventListener(`install`, event => {
     event.waitUntil(
-        caches.open(PRECACHE).then(cache => {
-            console.log('opened cache');
-            return cache.addAll(FILES_TO_CACHE);
-        })
-    )
+        caches
+            .open(STATIC_CACHE)
+            .then(cache => cache.addAll(FILES_TO_CACHE))
+            .then(() => self.skipWaiting())
+    );
 });
 
-self.addEventListener('fetch', event => {
-    if (event.request.url.includes('/api/')) {
+self.addEventListener(`activate`, event => {
+    const currentCaches = [STATIC_CACHE, RUNTIME_CACHE];
+    event.waitUntil(
+        caches
+            .keys()
+            .then(cacheNames =>
+                // return array of cache names that are old to delete
+                cacheNames.filter(cacheName => !currentCaches.includes(cacheName))
+            )
+            .then(cachesToDelete =>
+                Promise.all(
+                    cachesToDelete.map(cacheToDelete => caches.delete(cacheToDelete))
+                )
+            )
+            .then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener(`fetch`, event => {
+    if (
+        event.request.method !== `GET` ||
+        !event.request.url.startsWith(self.location.origin)
+    ) {
+        event.respondWith(fetch(event.request));
+        return;
+    }
+
+    if (event.request.url.includes(`/api/transaction`)) {
         event.respondWith(
-            caches.open(RUNTIME).then(cache => {
-                return fetch(event.request)
+            caches.open(RUNTIME_CACHE).then(cache =>
+                fetch(event.request)
                     .then(response => {
-                        if (response.status === 200) {
-                            cache.put(event.request.url, response.clone());
-                        }
+                        cache.put(event.request, response.clone());
                         return response;
                     })
-                    .catch(err => {
-                        return cache.match(event.request);
-                    });
-            }).catch(err => console.log(err))
+                    .catch(() => caches.match(event.request))
+            )
         );
         return;
     }
+
     event.respondWith(
-        fetch(event.request).catch(function () {
-            return caches.match(event.request).then(function (response) {
-                if (response) {
-                    return response;
-                } else if (event.request.headers.get('accept').includes('text/html')) {
-                    return caches.match('/');
-                }
-            });
+        caches.match(event.request).then(cachedResponse => {
+            if (cachedResponse) {
+                return cachedResponse;
+            }
+
+            return caches
+                .open(RUNTIME_CACHE)
+                .then(cache =>
+                    fetch(event.request).then(response =>
+                        cache.put(event.request, response.clone()).then(() => response)
+                    )
+                );
         })
     );
 });
