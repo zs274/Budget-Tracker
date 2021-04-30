@@ -40,10 +40,10 @@ self.addEventListener('fetch', event => {
     }
     event.respondWith(
         fetch(event.request).catch(function () {
-            return cache.watch(event.request).then(function (response) {
+            return caches.match(event.request).then(function (response) {
                 if (response) {
                     return response;
-                } else if (event.request.headers.get('accept').imcludes('text/html')) {
+                } else if (event.request.headers.get('accept').includes('text/html')) {
                     return caches.match('/');
                 }
             });
